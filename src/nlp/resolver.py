@@ -15,7 +15,6 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "..", "cache", "mapping.sqlite
 #  DB bootstrap
 # ---------------------------------------------------------------------
 def _init_db() -> None:
-    """Create tables the first time the resolver is touched."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
         conn.executescript(
@@ -31,17 +30,21 @@ def _init_db() -> None:
             CREATE TABLE IF NOT EXISTS player (
                 id      INTEGER PRIMARY KEY,
                 name    TEXT,
-                common  TEXT          -- optional short/known-as name
+                common  TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_player_name
                 ON player(name COLLATE NOCASE);
-        """
+
+            /*  NEW — standings season cache  */
+            CREATE TABLE IF NOT EXISTS standings_cache (
+                league INTEGER,
+                season TEXT,
+                json   TEXT,
+                PRIMARY KEY (league, season)
+            );
+            """
         )
 
-
-# ---------------------------------------------------------------------
-#  League resolver (memory-only cache)
-# ---------------------------------------------------------------------
 @lru_cache(maxsize=2048)
 def league_name_to_id(name: str) -> Optional[int]:
     """Resolve league name → numeric ID using live API search."""
@@ -49,10 +52,6 @@ def league_name_to_id(name: str) -> Optional[int]:
     data = r.json().get("response", [])
     return data[0]["league"]["id"] if data else None
 
-
-# ---------------------------------------------------------------------
-#  Team resolver  (SQLite persistent cache + API search)
-# ---------------------------------------------------------------------
 @lru_cache(maxsize=4096)
 def team_name_to_id(
     name: str,
@@ -69,7 +68,7 @@ def team_name_to_id(
             return row[0]
 
     # Not cached → API search
-    params: Dict[str, Any] = {"search": name}
+    params: Dict[str, Any] = {"name": name}
     if league_id:
         params["league"] = league_id
     if season:
@@ -87,10 +86,6 @@ def team_name_to_id(
         return t["id"]
     return None
 
-
-# ---------------------------------------------------------------------
-#  NEW  Player resolver  (same pattern)
-# ---------------------------------------------------------------------
 @lru_cache(maxsize=4096)
 def player_name_to_id(
     name: str,
@@ -127,3 +122,21 @@ def player_name_to_id(
             )
         return p["id"]
     return None
+
+def cache_standings(league_id: int, season: str, rows):
+    _init_db()
+    import json, sqlite3
+    with sqlite3.connect(DB_PATH) as c:
+        c.execute("INSERT OR REPLACE INTO standings_cache VALUES (?,?,?)",
+                  (league_id, season, json.dumps(rows)))
+
+
+def load_standings_cache(league_id:int, season:str):
+    _init_db()
+    import json, sqlite3
+    with sqlite3.connect(DB_PATH) as c:
+        row = c.execute("SELECT json FROM standings_cache "
+                        "WHERE league=? AND season=?", (league_id, season)
+                        ).fetchone()
+        return json.loads(row[0]) if row else None
+

@@ -1,4 +1,4 @@
-import json, os, openai, re
+import json, os, openai, re, logging
 from .intent_schema import Intent, Sport, ParsedQuery
 from .prompt_sanitizer import is_safe_prompt
 
@@ -14,7 +14,13 @@ Return ONLY valid JSON conforming to the following schema:
  "season": "<text|null>",
  "date": "<YYYY-MM-DD|null>"
 }}
-Do not wrap the JSON in triple backticks or explanations."""
+Do not wrap the JSON in triple backticks or explanations.
+If the user doesn’t mention the league or season
+but the teams usually play in a well-known league,
+infer the likely league and season.  Example:
+User: "chelsea vs man united score 2025-05-16"
+Assistant JSON: {{ … "league_name":"Premier League", "season":"2024", … }}"""
+
 SYSTEM_TEMPLATE = SYSTEM_TEMPLATE.format(
     intents=", ".join([e.value for e in Intent]),
     sports=", ".join([s.value for s in Sport])
@@ -53,6 +59,14 @@ FEW_SHOT = [
     {"role": "assistant", "content": json.dumps({
         "intent":"unsupported","sport":"basketball","league_name":None,
         "team_a":None,"team_b":None,"player_name":None,"season":None,"date":None
+    })},
+    # 6. Missing league but well-known teams
+    {"role":"user","content":"chelsea vs man united score 2025-05-16"},
+    {"role":"assistant","content": json.dumps({
+        "intent":"fixture","sport":"football",
+        "league_name":"Premier League",
+        "team_a":"Chelsea","team_b":"Manchester United",
+        "player_name":None,"season":"2024","date":"2025-05-16"
     })}
 ]
 
@@ -77,8 +91,7 @@ def parse_user_prompt(prompt: str) -> ParsedQuery | None:
             {"role": "user",   "content": prompt}
         ]
     )
-    
-    
+
     # cost logging
     if os.getenv("LOG_COST") == "1":
         usage = response.usage                 # Dict with prompt_tokens, completion_tokens, total_tokens
