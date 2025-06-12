@@ -67,7 +67,13 @@ FEW_SHOT = [
         "league_name":"Premier League",
         "team_a":"Chelsea","team_b":"Manchester United",
         "player_name":None,"season":"2024","date":"2025-05-16"
-    })}
+    })},
+    {"role":"user","content":"Where was Sporting CP in Primeira Liga 2023/24?"},
+    {"role":"assistant","content": json.dumps({
+        "intent":"standings","sport":"football",
+        "league_name":"Primeira Liga","team_a":"Sporting CP",
+        "team_b":None,"player_name":None,"season":"2023","date":None
+    })},
 ]
 
 # --- model pricing (USD per 1 000 tokens) ---

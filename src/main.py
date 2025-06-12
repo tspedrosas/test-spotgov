@@ -6,14 +6,28 @@ from src.api_client import (get_standings, get_fixtures, get_match_events, get_p
 from src.nlp.intent_schema import Intent, Sport
 from src.response_formatter import fmt_standings, fmt_fixture_score, fmt_events, fmt_player_stats
 from src.nlp.resolver import load_standings_cache, cache_standings
+from src.utils import normalize_season
 
 load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+PENDING: dict | None = None
+
 def handle_query(user_msg: str):
-    parsed = parse_user_prompt(user_msg)
+    global PENDING
+
+    # --- Step 0: Was the previous turn waiting for a league? ------------
+    if PENDING and PENDING["need"] == "league_for_player":
+        # user_msg is assumed to be the league answer
+        league_name = user_msg.strip()
+        PENDING["parsed"]["league_name"] = league_name
+        parsed = PENDING["parsed"]
+        PENDING = None
+    else:
+        parsed = parse_user_prompt(user_msg)
+
     if parsed["sport"] != Sport.FOOTBALL:
         # graceful sport switch message
         s = parsed["sport"]
@@ -25,25 +39,26 @@ def handle_query(user_msg: str):
     logging.info(f"Detected intent: {intent}")
 
     if intent == Intent.STANDINGS:
-        lg_id = league_name_to_id(parsed["league_name"])
-        season = parsed.get("season") or "2023"
-        logging.info(f"Requesting standings for league_id={lg_id}, season={season}")
+        date  = parsed.get("date")
+        lg_id  = league_name_to_id(parsed["league_name"])
+        league = parsed["league_name"] or "Unknown League"
+        season = normalize_season(parsed.get("season") or current_season_key())
+
         rows = load_standings_cache(lg_id, season)
-        
-        if rows and ("gd" not in rows[0] or "pts" not in rows[0]):
-            rows = None   # force re-download & re-cache with the new structure
-        
         if rows is None:
-            data = get_standings(lg_id, season)
+            api = get_standings(lg_id, season)
             rows = [{
-                "rank":  e["rank"],
-                "team":  e["team"]["name"],
-                "stats": e["all"],          # played / win / draw / lose
-                "gd":    e["goalsDiff"],    # <— add
-                "pts":   e["points"]        # <— add
-            } for e in data["response"][0]["league"]["standings"][0]]
+                "rank": e["rank"],
+                "team": e["team"]["name"],
+                "stats": e["all"],
+                "gd":   e["goalsDiff"],
+                "pts":  e["points"]
+            } for e in api["response"][0]["league"]["standings"][0]]
             cache_standings(lg_id, season, rows)
-        return fmt_standings(rows)
+
+        # full vs single-team
+        return fmt_standings(rows, league, season, team_filter=parsed.get("team_a"))
+
 
     if intent == Intent.FIXTURE:
         lg_id = league_name_to_id(parsed["league_name"])
@@ -54,7 +69,7 @@ def handle_query(user_msg: str):
             lg_id = infer_league_from_h2h(a_id, b_id)
         
         date  = parsed.get("date")
-        season = parsed.get("season")
+        season = normalize_season(parsed.get("season"))
         logging.info(f"Requesting fixture for teams: {parsed['team_a']} vs {parsed['team_b']}, date={date}, season={season}")
 
         if a_id and b_id:
@@ -83,7 +98,7 @@ def handle_query(user_msg: str):
         if lg_id is None and a_id and b_id:
             lg_id = infer_league_from_h2h(a_id, b_id)
         date  = parsed.get("date")
-        season = parsed.get("season")
+        season = normalize_season(parsed.get("season"))
         logging.info(f"Requesting match events for teams: {parsed['team_a']} vs {parsed['team_b']}, date={date}, season={season}")
         fx    = get_fixtures(h2h=f"{a_id}-{b_id}", season=season)
         if date:
@@ -97,18 +112,24 @@ def handle_query(user_msg: str):
         return fmt_events(events)
 
     if intent == Intent.PLAYER_STATS:
-        lg_id = league_name_to_id(parsed["league_name"])
-        date  = parsed.get("date")
-        season = parsed.get("season")
-        pl_id = player_name_to_id(parsed["player_name"], league_id=lg_id, season=season)
+        league_name = parsed.get("league_name")
+        season = normalize_season(parsed.get("season"))
+        player = parsed.get("player_name")
+
+        # 1. if league missing ➜ ask and store context
+        if league_name is None:
+            PENDING = {"need": "league_for_player", "parsed": parsed}
+            return f"Which competition are you talking about?"
+
+        # 2. proceed as before
+        lg_id  = league_name_to_id(league_name)
+        pl_id  = player_name_to_id(player, lg_id, season)
         if not pl_id:
-            return "Player not found."
-        season = parsed.get("season") or "2023"
-        lg_id  = league_name_to_id(parsed["league_name"]) if parsed["league_name"] else None
-        logging.info(f"Requesting player stats for player: {parsed['player_name']}, season={season}, league_id={lg_id}")
-        stats  = get_player_stats(pl_id, season, lg_id)
+            return f"I couldn’t find player '{player}'."
+
+        stats = get_player_stats(pl_id, season, lg_id)
         if not stats["response"]:
-            return "No stats available."
+            return f"No stats found for {player} in {league_name} {season}/{int(season)+1}."
         return fmt_player_stats(stats["response"][0], season)
 
     return "I didn't understand that request."
