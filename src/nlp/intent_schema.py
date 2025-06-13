@@ -13,6 +13,7 @@ class Intent(str, Enum):
     MATCH_EVENTS    = "match_events"
     PLAYER_STATS    = "player_stats"
     BONUS_ODDS      = "odds"
+    BRACKET      = "bracket"  
     BONUS_H2H       = "head_to_head"
     UNSUPPORTED     = "unsupported"
 
@@ -22,6 +23,7 @@ class Sport(str, Enum):
     RUGBY = "rugby"
     F1 = "f1"
     OTHER = "other"
+    NONSPORT = "nonsport" 
 
 class ParsedQuery(TypedDict, total=False):
     intent: Intent
@@ -32,3 +34,8 @@ class ParsedQuery(TypedDict, total=False):
     player_name: Optional[str]
     season: Optional[str]  # "2023", "2021/22", "current", etc.
     date: Optional[str]    # ISO YYYY-MM-DD for specific fixture
+    stage: Optional[str]
+    stats_requested: Optional[list[str]]
+    player_stats_requested: Optional[list[str]]
+    which: Optional[Literal["next","last","specific","season","team_next","team_last"]]
+    count: Optional[int]

@@ -108,10 +108,12 @@ def player_name_to_id(
     params: Dict[str, Any] = {"search": name}
     if league_id:
         params["league"] = league_id
+
     if season:
         params["season"] = season
     
     resp = requests.get(f"{BASE}/players", headers=HEADERS, params=params).json()
+    
     data = resp.get("response", [])
     if data:
         p = data[0]["player"]
