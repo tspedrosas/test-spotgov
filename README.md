@@ -53,7 +53,7 @@ OPENAI_API_KEY=your_openai_key
 
 Run the chatbot:
 ```bash
-python -m src.main.py
+python -m src.main
 ```
 
 You can also run the chatbot with the `-cost` flag to see the cost of each query and the estimated cost per 1000 requests:
